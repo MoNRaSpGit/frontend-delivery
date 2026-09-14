@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "react-toastify";
 import { createEvent, deleteEvent, listEvents, updateEvent } from "../delivery.client";
-import { formatEventDateTime, toDateTimeLocalValue } from "../delivery.format";
+import { buildStartsAtFromParts, formatEventDateTime, maskDateInput, splitStartsAtIntoParts } from "../delivery.format";
 import type { DeliveryEvent, DeliveryEventStatus, DeliveryUser } from "../delivery.types";
 
 const REFRESH_INTERVAL_MS = 4000;
@@ -21,14 +21,16 @@ export function AdminScreen({ admin }: AdminScreenProps) {
   const [isLoading, setIsLoading] = useState(true);
 
   const [place, setPlace] = useState("");
-  const [startsAt, setStartsAt] = useState("");
+  const [dateText, setDateText] = useState("");
+  const [timeText, setTimeText] = useState("");
   const [notes, setNotes] = useState("");
   const [slots, setSlots] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
   const [editPlace, setEditPlace] = useState("");
-  const [editStartsAt, setEditStartsAt] = useState("");
+  const [editDateText, setEditDateText] = useState("");
+  const [editTimeText, setEditTimeText] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [editSlots, setEditSlots] = useState("");
   const [isEditSaving, setIsEditSaving] = useState(false);
@@ -54,8 +56,9 @@ export function AdminScreen({ admin }: AdminScreenProps) {
 
   async function handleCreateEvent(formEvent: React.FormEvent) {
     formEvent.preventDefault();
-    if (!place.trim() || !startsAt) {
-      toast.error("Completa el lugar y la fecha/hora del evento.");
+    const startsAt = buildStartsAtFromParts(dateText, timeText);
+    if (!place.trim() || !startsAt || !slots.trim()) {
+      toast.error("Completa el lugar, la fecha/hora (DD/MM/AAAA) y la cantidad de deliverys.");
       return;
     }
 
@@ -65,12 +68,13 @@ export function AdminScreen({ admin }: AdminScreenProps) {
         place: place.trim(),
         startsAt,
         notes: notes.trim() || undefined,
-        slots: slots.trim() ? Number(slots) : undefined,
+        slots: Number(slots),
         createdBy: admin.id
       });
       toast.success("Evento creado.");
       setPlace("");
-      setStartsAt("");
+      setDateText("");
+      setTimeText("");
       setNotes("");
       setSlots("");
       await refresh();
@@ -91,9 +95,11 @@ export function AdminScreen({ admin }: AdminScreenProps) {
   }
 
   function startEdit(event: DeliveryEvent) {
+    const { dateText: parsedDate, timeText: parsedTime } = splitStartsAtIntoParts(event.startsAt);
     setEditingEventId(event.id);
     setEditPlace(event.place);
-    setEditStartsAt(toDateTimeLocalValue(event.startsAt));
+    setEditDateText(parsedDate);
+    setEditTimeText(parsedTime);
     setEditNotes(event.notes ?? "");
     setEditSlots(event.slots !== null ? String(event.slots) : "");
   }
@@ -103,8 +109,9 @@ export function AdminScreen({ admin }: AdminScreenProps) {
   }
 
   async function handleSaveEdit(event: DeliveryEvent) {
-    if (!editPlace.trim() || !editStartsAt) {
-      toast.error("Completa el lugar y la fecha/hora del evento.");
+    const editStartsAt = buildStartsAtFromParts(editDateText, editTimeText);
+    if (!editPlace.trim() || !editStartsAt || !editSlots.trim()) {
+      toast.error("Completa el lugar, la fecha/hora (DD/MM/AAAA) y la cantidad de deliverys.");
       return;
     }
 
@@ -114,7 +121,7 @@ export function AdminScreen({ admin }: AdminScreenProps) {
         place: editPlace.trim(),
         startsAt: editStartsAt,
         notes: editNotes.trim(),
-        slots: editSlots.trim() ? Number(editSlots) : undefined
+        slots: Number(editSlots)
       });
       toast.success("Evento actualizado.");
       setEditingEventId(null);
@@ -152,20 +159,28 @@ export function AdminScreen({ admin }: AdminScreenProps) {
           </label>
 
           <label className="form-field">
-            <span>Fecha y hora</span>
+            <span>Fecha</span>
             <input
-              type="datetime-local"
-              value={startsAt}
-              onChange={(changeEvent) => setStartsAt(changeEvent.target.value)}
+              type="text"
+              inputMode="numeric"
+              placeholder="DD/MM/AAAA"
+              maxLength={10}
+              value={dateText}
+              onChange={(changeEvent) => setDateText(maskDateInput(changeEvent.target.value))}
             />
           </label>
 
           <label className="form-field">
-            <span>Cupo (opcional)</span>
+            <span>Hora</span>
+            <input type="time" value={timeText} onChange={(changeEvent) => setTimeText(changeEvent.target.value)} />
+          </label>
+
+          <label className="form-field">
+            <span>Cantidad de deliverys</span>
             <input
               type="number"
               min={1}
-              placeholder="Sin limite"
+              placeholder="Ej: 3"
               value={slots}
               onChange={(changeEvent) => setSlots(changeEvent.target.value)}
             />
@@ -214,20 +229,32 @@ export function AdminScreen({ admin }: AdminScreenProps) {
                     </label>
 
                     <label className="form-field">
-                      <span>Fecha y hora</span>
+                      <span>Fecha</span>
                       <input
-                        type="datetime-local"
-                        value={editStartsAt}
-                        onChange={(changeEvent) => setEditStartsAt(changeEvent.target.value)}
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="DD/MM/AAAA"
+                        maxLength={10}
+                        value={editDateText}
+                        onChange={(changeEvent) => setEditDateText(maskDateInput(changeEvent.target.value))}
                       />
                     </label>
 
                     <label className="form-field">
-                      <span>Cupo (opcional)</span>
+                      <span>Hora</span>
+                      <input
+                        type="time"
+                        value={editTimeText}
+                        onChange={(changeEvent) => setEditTimeText(changeEvent.target.value)}
+                      />
+                    </label>
+
+                    <label className="form-field">
+                      <span>Cantidad de deliverys</span>
                       <input
                         type="number"
                         min={1}
-                        placeholder="Sin limite"
+                        placeholder="Ej: 3"
                         value={editSlots}
                         onChange={(changeEvent) => setEditSlots(changeEvent.target.value)}
                       />

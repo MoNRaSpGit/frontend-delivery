@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "react-toastify";
 import { createSignup, deleteSignup, listEvents } from "../delivery.client";
-import { formatEventDateTime } from "../delivery.format";
+import { formatEventDateTime, isEventInPast } from "../delivery.format";
 import type { DeliveryEvent, DeliveryUser } from "../delivery.types";
 
 const REFRESH_INTERVAL_MS = 4000;
@@ -14,10 +14,20 @@ export function CourierScreen({ courier }: CourierScreenProps) {
   const [events, setEvents] = useState<DeliveryEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingEventId, setPendingEventId] = useState<number | null>(null);
+  // Eventos cancelados de los que ya se avisó al delivery (para no repetir
+  // el toast en cada refresco de 4s mientras siga viendo la pantalla).
+  const notifiedCancelledRef = useRef<Set<number>>(new Set());
 
   async function refresh() {
     try {
       const items = await listEvents();
+      for (const event of items) {
+        const wasSignedUp = event.signups.some((signup) => signup.userId === courier.id);
+        if (wasSignedUp && event.status === "cancelado" && !notifiedCancelledRef.current.has(event.id)) {
+          notifiedCancelledRef.current.add(event.id);
+          toast.warning(`Se cancelo el evento en ${event.place}, ya no hace falta que vayas.`);
+        }
+      }
       setEvents(items);
     } catch (error) {
       console.error(error);
@@ -51,9 +61,33 @@ export function CourierScreen({ courier }: CourierScreenProps) {
   }
 
   const visibleEvents = events.filter((event) => event.status !== "cancelado");
+  const mySignedUpEvents = events.filter((event) => event.signups.some((signup) => signup.userId === courier.id));
 
   return (
     <div className="screen">
+      <section className="card">
+        <h2>Tus eventos</h2>
+        {mySignedUpEvents.length === 0 ? (
+          <p className="muted">Todavia no te anotaste a ningun evento.</p>
+        ) : (
+          <ul className="event-list">
+            {mySignedUpEvents.map((event) => (
+              <li key={event.id} className={`event-item event-item--${event.status}`}>
+                <div className="event-item__header">
+                  <div>
+                    <strong>{event.place}</strong>
+                    <span className="event-item__when">{formatEventDateTime(event.startsAt)}</span>
+                  </div>
+                  <span className={`status-pill status-pill--${event.status}`}>
+                    {event.status === "cancelado" ? "Cancelado" : "Confirmado"}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <section className="card">
         <h2>Eventos</h2>
         {isLoading ? <p className="muted">Cargando...</p> : null}
@@ -63,7 +97,8 @@ export function CourierScreen({ courier }: CourierScreenProps) {
           {visibleEvents.map((event) => {
             const isSignedUp = event.signups.some((signup) => signup.userId === courier.id);
             const isFull = event.slots !== null && event.signups.length >= event.slots && !isSignedUp;
-            const canAct = event.status === "abierto" && !isFull;
+            const isPast = isEventInPast(event.startsAt);
+            const canAct = event.status === "abierto" && !isFull && !isPast;
 
             return (
               <li key={event.id} className={`event-item event-item--${event.status}`}>
@@ -102,7 +137,7 @@ export function CourierScreen({ courier }: CourierScreenProps) {
                     disabled={pendingEventId === event.id || (!isSignedUp && !canAct)}
                     onClick={() => void handleToggleSignup(event, isSignedUp)}
                   >
-                    {isSignedUp ? "Desanotarme" : isFull ? "Sin cupo" : "Anotarme"}
+                    {isSignedUp ? "Desanotarme" : isPast ? "Evento pasado" : isFull ? "Sin cupo" : "Anotarme"}
                   </button>
                 </div>
               </li>

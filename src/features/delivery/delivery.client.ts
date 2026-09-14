@@ -32,7 +32,7 @@ export async function createEvent(payload: {
   place: string;
   startsAt: string;
   notes?: string;
-  slots?: number;
+  slots: number;
   createdBy: number;
 }) {
   const response = await fetch(buildUrl("/delivery/events"), {

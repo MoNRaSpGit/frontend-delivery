@@ -25,3 +25,44 @@ export function formatEventDateTime(startsAt: string): string {
 export function toDateTimeLocalValue(startsAt: string): string {
   return startsAt.slice(0, 16);
 }
+
+// Mascara de fecha DD/MM/AAAA: el usuario solo tipea numeros, las barras se
+// insertan solas a medida que completa dia/mes/anio. Se aplica sobre cada
+// tecleo (oninput), asi que tambien "arregla" el valor si borra una barra.
+export function maskDateInput(rawValue: string): string {
+  const digits = rawValue.replace(/\D/g, "").slice(0, 8);
+  const day = digits.slice(0, 2);
+  const month = digits.slice(2, 4);
+  const year = digits.slice(4, 8);
+
+  let result = day;
+  if (month) result += `/${month}`;
+  if (year) result += `/${year}`;
+  return result;
+}
+
+// Arma el "YYYY-MM-DDTHH:mm" que espera el backend a partir de la fecha
+// tipeada con mascara ("DD/MM/AAAA") y la hora (input type="time",
+// "HH:mm"). Devuelve null si la fecha todavia esta incompleta.
+export function buildStartsAtFromParts(dateText: string, timeText: string): string | null {
+  const match = dateText.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match || !timeText) return null;
+  const [, day, month, year] = match;
+  return `${year}-${month}-${day}T${timeText}`;
+}
+
+// Inverso de buildStartsAtFromParts: separa un startsAt ("YYYY-MM-DDTHH:mm:ss")
+// en {dateText, timeText} para precargar el formulario de edicion.
+export function splitStartsAtIntoParts(startsAt: string): { dateText: string; timeText: string } {
+  const [datePart, timePart] = startsAt.split("T");
+  const [year, month, day] = (datePart ?? "").split("-");
+  const timeText = (timePart ?? "").slice(0, 5);
+  return { dateText: day && month && year ? `${day}/${month}/${year}` : "", timeText };
+}
+
+// Mismo criterio que formatEventDateTime: startsAt sin "Z" se interpreta
+// como hora local del navegador, que coincide con la hora real de
+// Montevideo para todos los usuarios de esta app.
+export function isEventInPast(startsAt: string): boolean {
+  return new Date(startsAt).getTime() < Date.now();
+}
