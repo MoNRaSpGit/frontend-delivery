@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { toast } from "react-toastify";
 import { createEvent, deleteEvent, listEvents, updateEvent } from "../delivery.client";
-import { buildStartsAtFromParts, formatEventDateTime, maskDateInput, splitStartsAtIntoParts } from "../delivery.format";
+import {
+  buildStartsAtFromParts,
+  formatEventDateTime,
+  isEventInPast,
+  maskDateInput,
+  splitStartsAtIntoParts
+} from "../delivery.format";
 import type { DeliveryEvent, DeliveryEventStatus, DeliveryUser } from "../delivery.types";
 
 const REFRESH_INTERVAL_MS = 4000;
@@ -34,6 +40,9 @@ export function AdminScreen({ admin }: AdminScreenProps) {
   const [editNotes, setEditNotes] = useState("");
   const [editSlots, setEditSlots] = useState("");
   const [isEditSaving, setIsEditSaving] = useState(false);
+
+  const [activeTab, setActiveTab] = useState<"proximos" | "historial">("proximos");
+  const [expandedEventId, setExpandedEventId] = useState<number | null>(null);
 
   async function refresh() {
     try {
@@ -133,6 +142,10 @@ export function AdminScreen({ admin }: AdminScreenProps) {
     }
   }
 
+  function toggleExpanded(eventId: number) {
+    setExpandedEventId((current) => (current === eventId ? null : eventId));
+  }
+
   async function handleDelete(event: DeliveryEvent) {
     try {
       await deleteEvent(event.id);
@@ -142,6 +155,12 @@ export function AdminScreen({ admin }: AdminScreenProps) {
       toast.error(error instanceof Error ? error.message : "No se pudo eliminar el evento.");
     }
   }
+
+  const upcomingEvents = events
+    .filter((event) => event.status !== "cancelado" && !isEventInPast(event.startsAt))
+    .sort((a, b) => (a.startsAt < b.startsAt ? -1 : a.startsAt > b.startsAt ? 1 : 0));
+  const historyEvents = events.filter((event) => event.status === "cancelado" || isEventInPast(event.startsAt));
+  const visibleEvents = activeTab === "proximos" ? upcomingEvents : historyEvents;
 
   return (
     <div className="screen">
@@ -202,13 +221,34 @@ export function AdminScreen({ admin }: AdminScreenProps) {
         </form>
       </section>
 
+      <div className="tab-bar">
+        <button
+          type="button"
+          className={`tab-button${activeTab === "proximos" ? " tab-button--active" : ""}`}
+          onClick={() => setActiveTab("proximos")}
+        >
+          Proximos{upcomingEvents.length ? ` (${upcomingEvents.length})` : ""}
+        </button>
+        <button
+          type="button"
+          className={`tab-button${activeTab === "historial" ? " tab-button--active" : ""}`}
+          onClick={() => setActiveTab("historial")}
+        >
+          Historial{historyEvents.length ? ` (${historyEvents.length})` : ""}
+        </button>
+      </div>
+
       <section className="card">
-        <h2>Eventos</h2>
+        <h2>{activeTab === "proximos" ? "Proximos eventos" : "Historial"}</h2>
         {isLoading ? <p className="muted">Cargando...</p> : null}
-        {!isLoading && events.length === 0 ? <p className="muted">Todavia no hay eventos cargados.</p> : null}
+        {!isLoading && visibleEvents.length === 0 ? (
+          <p className="muted">
+            {activeTab === "proximos" ? "No hay eventos proximos." : "Todavia no hay eventos en el historial."}
+          </p>
+        ) : null}
 
         <ul className="event-list">
-          {events.map((event) => {
+          {visibleEvents.map((event) => {
             if (editingEventId === event.id) {
               return (
                 <li key={event.id} className={`event-item event-item--${event.status}`}>
@@ -282,59 +322,89 @@ export function AdminScreen({ admin }: AdminScreenProps) {
               );
             }
 
+            const isExpanded = expandedEventId === event.id;
+
             return (
               <li key={event.id} className={`event-item event-item--${event.status}`}>
-                <div className="event-item__header">
+                <button
+                  type="button"
+                  className="event-item__header event-item__header--toggle"
+                  onClick={() => toggleExpanded(event.id)}
+                >
                   <div>
                     <strong>{event.place}</strong>
                     <span className="event-item__when">{formatEventDateTime(event.startsAt)}</span>
                   </div>
-                  <span className={`status-pill status-pill--${event.status}`}>{STATUS_LABELS[event.status]}</span>
-                </div>
+                  <div className="event-item__header-right">
+                    {event.slots !== null ? (
+                      <span className="event-item__slots-inline">
+                        {event.signups.length}/{event.slots}
+                      </span>
+                    ) : null}
+                    <span className={`status-pill status-pill--${event.status}`}>{STATUS_LABELS[event.status]}</span>
+                    <span className="event-item__chevron">{isExpanded ? "▲" : "▼"}</span>
+                  </div>
+                </button>
 
-                {event.notes ? <p className="event-item__notes">{event.notes}</p> : null}
-                {event.slots !== null ? (
-                  <p className="event-item__slots">
-                    Cupo: {event.signups.length}/{event.slots}
-                  </p>
-                ) : null}
+                {!isExpanded ? null : (
+                  <>
+                    {event.notes ? <p className="event-item__notes">{event.notes}</p> : null}
+                    {event.slots !== null ? (
+                      <p className="event-item__slots">
+                        Cupo: {event.signups.length}/{event.slots}
+                      </p>
+                    ) : null}
 
-                <div className="event-item__signups">
-                  <span className="event-item__signups-label">Anotados ({event.signups.length}):</span>
-                  {event.signups.length ? (
-                    <ul className="signup-list">
-                      {event.signups.map((signup) => (
-                        <li key={signup.id}>{signup.userName}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <span className="muted"> nadie todavia</span>
-                  )}
-                </div>
+                    <div className="event-item__signups">
+                      <span className="event-item__signups-label">Anotados ({event.signups.length}):</span>
+                      {event.signups.length ? (
+                        <ul className="signup-list">
+                          {event.signups.map((signup) => (
+                            <li key={signup.id}>{signup.userName}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span className="muted"> nadie todavia</span>
+                      )}
+                    </div>
 
-                <div className="event-item__actions">
-                  <button type="button" className="ghost-button" onClick={() => startEdit(event)}>
-                    Editar
-                  </button>
-                  {event.status === "abierto" ? (
-                    <button type="button" className="ghost-button" onClick={() => void handleStatusChange(event, "cerrado")}>
-                      Cerrar inscripciones
-                    </button>
-                  ) : null}
-                  {event.status === "cerrado" ? (
-                    <button type="button" className="ghost-button" onClick={() => void handleStatusChange(event, "abierto")}>
-                      Reabrir
-                    </button>
-                  ) : null}
-                  {event.status !== "cancelado" ? (
-                    <button type="button" className="ghost-button" onClick={() => void handleStatusChange(event, "cancelado")}>
-                      Cancelar
-                    </button>
-                  ) : null}
-                  <button type="button" className="danger-button" onClick={() => void handleDelete(event)}>
-                    Eliminar
-                  </button>
-                </div>
+                    <div className="event-item__actions">
+                      <button type="button" className="ghost-button" onClick={() => startEdit(event)}>
+                        Editar
+                      </button>
+                      {event.status === "abierto" ? (
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => void handleStatusChange(event, "cerrado")}
+                        >
+                          Cerrar inscripciones
+                        </button>
+                      ) : null}
+                      {event.status === "cerrado" ? (
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => void handleStatusChange(event, "abierto")}
+                        >
+                          Reabrir
+                        </button>
+                      ) : null}
+                      {event.status !== "cancelado" ? (
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => void handleStatusChange(event, "cancelado")}
+                        >
+                          Cancelar
+                        </button>
+                      ) : null}
+                      <button type="button" className="danger-button" onClick={() => void handleDelete(event)}>
+                        Eliminar
+                      </button>
+                    </div>
+                  </>
+                )}
               </li>
             );
           })}
